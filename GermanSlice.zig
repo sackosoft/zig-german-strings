@@ -3,6 +3,7 @@ const Alloc = std.mem.Allocator;
 const T = std.testing;
 
 const ContentSize: usize = 12;
+const ContentPrefixSize = ContentSize - @sizeOf([*]u8);
 const Content = packed union {
     value: @Vector(ContentSize, u8),
     reference: packed struct {
@@ -32,11 +33,10 @@ pub const GermanSlice = packed struct {
             };
         }
 
-        const prefix_len = ContentSize - @sizeOf([*]u8);
-        var prefix: [prefix_len]u8 = @splat(0);
-        @memcpy(prefix[0..prefix_len], data[0..prefix_len]);
+        var prefix: [ContentPrefixSize]u8 = @splat(0);
+        @memcpy(prefix[0..ContentPrefixSize], data[0..ContentPrefixSize]);
 
-        const copy = try alloc.dupe(u8, data);
+        const copy = try alloc.dupe(u8, data[ContentPrefixSize..]);
         return .{
             .len = @intCast(data.len),
             .content = .{ .reference = .{
@@ -51,7 +51,7 @@ pub const GermanSlice = packed struct {
             return;
         }
 
-        alloc.free(this.content.reference.ptr[0..this.len]);
+        alloc.free(this.content.reference.ptr[0 .. this.len - ContentPrefixSize]);
     }
 
     pub fn eql(this: GermanSlice, other: GermanSlice) bool {
@@ -67,7 +67,9 @@ pub const GermanSlice = packed struct {
             return false;
         }
 
-        return std.mem.eql(u8, this.content.reference.ptr[0..this.len], other.content.reference.ptr[0..this.len]);
+        const this_heap_slice = this.content.reference.ptr[0 .. this.len - ContentPrefixSize];
+        const other_heap_slice = other.content.reference.ptr[0 .. this.len - ContentPrefixSize];
+        return std.mem.eql(u8, this_heap_slice, other_heap_slice);
     }
 };
 
@@ -75,6 +77,36 @@ test "Content should pack nicely within the user facing struct." {
     try std.testing.expectEqual(16, @sizeOf(@Vector(12, u8)));
     try std.testing.expectEqual(16, @sizeOf(Content));
     try std.testing.expectEqual(16, @sizeOf(GermanSlice));
+}
+
+test {
+    var gs1: GermanSlice = try .init(T.allocator, "");
+    var gs2: GermanSlice = try .init(T.allocator, "");
+    try T.expect(gs1.eql(gs2));
+
+    gs1 = try .init(T.allocator, "a");
+    gs2 = try .init(T.allocator, "A");
+    try T.expect(!gs1.eql(gs2));
+
+    gs1 = try .init(T.allocator, "\x00");
+    gs2 = try .init(T.allocator, "\x00");
+    try T.expect(gs1.eql(gs2));
+
+    gs1 = try .init(T.allocator, "\x00A");
+    gs2 = try .init(T.allocator, "\x00A");
+    try T.expect(gs1.eql(gs2));
+
+    gs1 = try .init(T.allocator, "\x00A");
+    gs2 = try .init(T.allocator, "\x00B");
+    try T.expect(!gs1.eql(gs2));
+}
+
+test {
+    var gs1: GermanSlice = try .init(T.allocator, "44444444444444444444");
+    var gs2: GermanSlice = try .init(T.allocator, "44444444444444444444");
+    try T.expect(gs1.eql(gs2));
+    gs1.deinit(T.allocator);
+    gs2.deinit(T.allocator);
 }
 
 test {
@@ -86,8 +118,8 @@ test {
     gs2 = try .init(T.allocator, "123456789012");
     try T.expect(gs1.eql(gs2));
 
-    var gs1: GermanSlice = try .init(T.allocator, "hello");
-    var gs2: GermanSlice = try .init(T.allocator, "hallo");
+    gs1 = try .init(T.allocator, "hello");
+    gs2 = try .init(T.allocator, "hallo");
     try T.expect(!gs1.eql(gs2));
 
     gs1 = try .init(T.allocator, "123456789012");
