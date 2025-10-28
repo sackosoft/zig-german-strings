@@ -51,7 +51,7 @@ fn run_tests(comptime T: type, alloc: Alloc) !struct { usize, usize } {
     var prng = std.Random.DefaultPrng.init(37);
     var random = prng.random();
 
-    for (0..10_000) |_| {
+    for (0..100_000) |_| {
         const case = random.intRangeLessThan(u8, 0, 100);
         if (case < 15) {
             // 15% of the time, compared strings are guaranteed to be identical
