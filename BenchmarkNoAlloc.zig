@@ -4,9 +4,6 @@ const Alloc = std.mem.Allocator;
 const GermanSlice = @import("GermanSlice.zig").GermanSlice;
 
 pub fn main() !void {
-    var da = std.heap.DebugAllocator(.{}).init;
-    defer _ = da.deinit();
-
     if (std.os.argv.len != 2) {
         std.debug.print(
             "Invalid arguments. Usage: `{s} german` or `{s} normal`\n",
@@ -15,15 +12,14 @@ pub fn main() !void {
         return error.InvalidArguments;
     }
 
-    const alloc = da.allocator();
     const impl = std.mem.sliceTo(std.os.argv[1], @as(u8, 0));
 
     if (std.mem.eql(u8, "german", impl)) {
-        const same, const different = try run_tests(GermanSlice, alloc);
+        const same, const different = try run_tests(GermanSlice);
         std.debug.print("Same: {d}\n", .{same});
         std.debug.print("Different: {d}\n", .{different});
     } else if (std.mem.eql(u8, "normal", impl)) {
-        const same, const different = try run_tests(NormalSlice, alloc);
+        const same, const different = try run_tests(NormalSlice);
         std.debug.print("Same: {d}\n", .{same});
         std.debug.print("Different: {d}\n", .{different});
     } else {
@@ -35,7 +31,7 @@ pub fn main() !void {
     }
 }
 
-fn run_tests(comptime T: type, alloc: Alloc) !struct { usize, usize } {
+fn run_tests(comptime T: type) !struct { usize, usize } {
     var same: usize = 0;
     var different: usize = 0;
 
@@ -56,33 +52,27 @@ fn run_tests(comptime T: type, alloc: Alloc) !struct { usize, usize } {
         if (case < 15) {
             // 15% of the time, compared strings are guaranteed to be identical
             const span = choose_span(&random, &buf);
-            var s1: T = try .initAlloc(alloc, span);
-            var s2: T = try .initAlloc(alloc, span);
+            const s1: T = try .init(span);
+            const s2: T = try .init(span);
 
             if (!s1.eql(s2)) {
                 std.debug.print("Same strings not same? '{s}'\n", .{span});
                 unreachable;
             }
             same += 1;
-
-            s1.deinit(alloc);
-            s2.deinit(alloc);
         } else {
             // 85% of the time, compared strings are randomly selected
             const span1 = choose_span(&random, &buf);
             const span2 = choose_span(&random, &buf);
 
-            var s1: T = try .initAlloc(alloc, span1);
-            var s2: T = try .initAlloc(alloc, span2);
+            const s1: T = try .init(span1);
+            const s2: T = try .init(span2);
 
             if (s1.eql(s2)) {
                 same += 1;
             } else {
                 different += 1;
             }
-
-            s1.deinit(alloc);
-            s2.deinit(alloc);
         }
     }
 
@@ -91,19 +81,19 @@ fn run_tests(comptime T: type, alloc: Alloc) !struct { usize, usize } {
 
 fn choose_span(random: *std.Random, buf: []u8) []const u8 {
     const case = random.intRangeLessThan(u8, 0, 100);
-    if (case < 60) {
-        // 60% of the time, strings are very small
+    if (case < 33) {
+        // 33% of the time, strings are very small
         const run = random.intRangeLessThan(usize, 0, 32);
         const start = random.intRangeLessThan(usize, 0, buf.len - run - 1);
         return buf[start .. start + run];
-    } else if (case < 90) {
-        // 30% of the time, strings are medium sized
+    } else if (case < 66) {
+        // 33% of the time, strings are medium sized
         const run = random.intRangeLessThan(usize, 32, 512);
         const start = random.intRangeLessThan(usize, 0, buf.len - run - 1);
         return buf[start .. start + run];
     } else if (case < 100) {
-        // 10% of the time, strings are large
-        const run = random.intRangeLessThan(usize, 512, 4096);
+        // 34% of the time, strings are large
+        const run = random.intRangeLessThan(usize, 512, 16384);
         const start = random.intRangeLessThan(usize, 0, buf.len - run - 1);
         return buf[start .. start + run];
     } else {
@@ -112,28 +102,17 @@ fn choose_span(random: *std.Random, buf: []u8) []const u8 {
 }
 
 pub const NormalSlice = struct {
-    len: u32,
     content: []const u8,
 
-    pub const InitError = error{TooLong} || Alloc.Error;
-    pub fn initAlloc(alloc: Alloc, data: []const u8) InitError!NormalSlice {
-        if (data.len > std.math.maxInt(u32)) {
-            return error.TooLong;
-        }
-
-        const copy = try alloc.dupe(u8, data);
+    pub const InitError = error{TooLong};
+    pub fn init(data: []const u8) InitError!NormalSlice {
         return .{
-            .len = @intCast(data.len),
-            .content = copy,
+            .content = data,
         };
     }
 
-    pub fn deinit(this: *NormalSlice, alloc: Alloc) void {
-        alloc.free(this.content);
-    }
-
     pub fn eql(this: NormalSlice, other: NormalSlice) bool {
-        if (this.len != other.len) {
+        if (this.content.len != other.content.len) {
             return false;
         }
 
